@@ -4,12 +4,13 @@
 
 ## 下载与使用
 
-在 [Releases](https://github.com/Aliww2468/frp-panel/releases/latest) 下载 `FRP-Panel-Setup-1.2.0-x64.exe`，安装后从桌面或开始菜单打开。
+在 [Releases](https://github.com/Aliww2468/frp-panel/releases/latest) 下载 `FRP-Panel-Setup-1.2.1-x64.exe`，安装后从桌面或开始菜单打开。
 
 - 支持 Windows 10/11 x64，内置 Python 和 FRPC 0.71.0；安装时自动检测 .NET 8 Desktop Runtime x64，缺少才联网安装。
 - 在「连接配置」中填写连接信息，或直接导入服务商提供的 UTF-8 `.toml` 配置。
 - 查看真实连接状态，管理 TCP / UDP 代理，搜索规则、复制地址、查看和导出日志。
 - 关闭或最小化窗口后驻留托盘；双击托盘图标恢复，右键可启停客户端、设置开机自启或退出。
+- 同一 Windows 会话只允许运行一个面板，跨安装目录也会检测。重复启动会提示“软件已在运行”，确认提示后退出本次启动，不影响原实例。
 - 四种风格：简约浅色、午夜深色、暖砂米色、雾蓝灰。Windows 11 标题栏同步风格并隐藏外框描边。
 
 首次打开和开机自启均不会自动建立 FRP 转发；配置完成后手动启动客户端。多数服务商不支持从客户端直接新增隧道，请先在服务商后台创建。

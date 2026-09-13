@@ -13,6 +13,8 @@ desktop/app/
 desktop/downloads/
 desktop/bin/
 desktop/obj/
+desktop/tests/**/bin/
+desktop/tests/**/obj/
 desktop/package/
 desktop/tools/
 release/

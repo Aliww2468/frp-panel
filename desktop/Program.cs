@@ -18,6 +18,13 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         try
         {
+            using var instance = SingleInstance.TryAcquire();
+            if (instance == null)
+            {
+                MessageBox.Show("FRP Panel 已在运行，请从系统托盘打开。\n\n本次启动已取消。",
+                    "软件已在运行", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             string workspace = FindWorkspace(args);
             int portIndex = Array.IndexOf(args, "--port");
             int port = 17600;
@@ -25,11 +32,7 @@ internal static class Program
                 !int.TryParse(args[portIndex + 1], out port) || port < 1024 || port > 65535))
                 throw new ArgumentException("面板端口必须在 1024 到 65535 之间。");
             string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(workspace.ToUpperInvariant())))[..16];
-            using var mutex = new Mutex(true, @"Local\FrpPanel-" + id, out bool first);
-            using var wake = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\FrpPanel-Show-" + id);
-            if (!first) { wake.Set(); return; }
-            try { Application.Run(new PanelWindow(workspace, id, wake, args.Contains("--background"), port)); }
-            finally { mutex.ReleaseMutex(); }
+            Application.Run(new PanelWindow(workspace, id, args.Contains("--background"), port));
         }
         catch (Exception error)
         {
@@ -59,7 +62,6 @@ internal sealed class PanelWindow : Form
     readonly string BaseUrl;
     readonly int panelPort;
     readonly string workspace, stateDir, startupName;
-    readonly EventWaitHandle wake;
     readonly NotifyIcon tray;
     readonly WebView2 view = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.FromArgb(248, 249, 251) };
     readonly Label loading = new() { Dock = DockStyle.Fill, Text = "正在启动本地控制台…", TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.Gray };
@@ -120,10 +122,10 @@ internal sealed class PanelWindow : Form
         ApplyWindowTheme(theme);
     }
 
-    public PanelWindow(string root, string id, EventWaitHandle showEvent, bool startHidden, int port)
+    public PanelWindow(string root, string id, bool startHidden, int port)
     {
         panelPort = port; BaseUrl = $"http://127.0.0.1:{port}";
-        workspace = root; wake = showEvent; background = startHidden;
+        workspace = root; background = startHidden;
         stateDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FrpPanel", id);
         Directory.CreateDirectory(stateDir);
         startupName = "FrpPanel-" + id;
@@ -156,15 +158,6 @@ internal sealed class PanelWindow : Form
         };
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) HideToTray(); };
         timer.Tick += async (_, _) => await PollStatus();
-        _ = Task.Run(() =>
-        {
-            while (!IsDisposed)
-            {
-                try { if (wake.WaitOne(1000) && IsHandleCreated) BeginInvoke(ShowPanel); }
-                catch (ObjectDisposedException) { break; }
-                catch (InvalidOperationException) { break; }
-            }
-        });
     }
 
     protected override void SetVisibleCore(bool value)
@@ -327,7 +320,7 @@ internal sealed class PanelWindow : Form
     void HideToTray()
     {
         Hide();
-        if (!announced) { announced = true; tray.ShowBalloonTip(3500, "FRP Panel 已在后台运行", "关闭窗口不会停止转发。双击托盘图标或再次打开软件即可恢复窗口。", ToolTipIcon.Info); }
+        if (!announced) { announced = true; tray.ShowBalloonTip(3500, "FRP Panel 已在后台运行", "关闭窗口不会停止转发。双击系统托盘中的 FRP Panel 图标即可恢复窗口。", ToolTipIcon.Info); }
     }
 
     bool StartupEnabled()
