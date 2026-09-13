@@ -14,8 +14,9 @@ $appIcon = [Drawing.Icon]::FromHandle($bitmap.GetHicon())
 $iconStream = [IO.File]::Create((Join-Path $desktopRoot 'app.ico'))
 $appIcon.Save($iconStream)
 $iconStream.Dispose(); $graphics.Dispose(); $bitmap.Dispose(); $font.Dispose()
-dotnet publish (Join-Path $desktopRoot 'FrpPanel.csproj') -c Release -r win-x64 --self-contained true -o $appOutput -p:DebugType=None -p:DebugSymbols=false
+dotnet publish (Join-Path $desktopRoot 'FrpPanel.csproj') -c Release -r win-x64 --self-contained false -o $appOutput -p:DebugType=None -p:DebugSymbols=false
 if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed.' }
+& (Join-Path $desktopRoot 'remove-legacy-runtime.ps1') -AppDirectory $appOutput
 $pythonArchive = Join-Path $downloadDir 'python-3.12.10-embed-amd64.zip'
 if (-not (Test-Path -LiteralPath $pythonArchive)) {
     Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip' -OutFile $pythonArchive

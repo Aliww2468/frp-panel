@@ -2,10 +2,10 @@
 
 ## EXE 安装包
 
-成品位于 `../release/FRP-Panel-Setup-1.1.1-x64.exe`，也可从仓库 Releases 下载，支持 Windows 10/11 x64。
-这是包含软件和运行环境的安装包；安装后通过桌面或开始菜单快捷方式启动。
-默认安装到 `%LOCALAPPDATA%/Programs/FrpPanel`，不要求管理员权限。
-缺少 WebView2 时安装程序会联网安装 Microsoft 官方运行环境。
+成品位于 `../release/FRP-Panel-Setup-1.2.0-x64.exe`，也可从仓库 Releases 下载，支持 Windows 10/11 x64。
+安装包内置 Python 和 FRPC，桌面程序使用系统共享的 .NET 8 Desktop Runtime x64；安装后通过桌面或开始菜单快捷方式启动。
+应用默认安装到 `%LOCALAPPDATA%/Programs/FrpPanel`。安装时检测 .NET 8 桌面及核心运行时，已有则跳过下载；缺少时下载并校验微软官方安装程序，再请求管理员权限完成系统运行时安装。
+普通 .NET Runtime、x86 运行时或仅有 .NET 9/10 不能替代所需的 .NET 8 Desktop Runtime x64。缺少 WebView2 时也会联网安装。离线安装需提前准备这两项运行环境。
 
 安装包只包含程序和空白初始状态，不包含开发目录里的服务器地址、Token、代理规则、日志或备份。
 首次启动自动生成本机管理密码；覆盖安装和卸载均保留已生成的配置、日志及备份。
@@ -13,6 +13,10 @@
 
 运行 `desktop/build-installer.ps1` 可重新打包。需要 .NET 8 SDK、Inno Setup 6 编译器（默认 `desktop/tools/inno/ISCC.exe`，可用 `-Compiler` 指定），以及 `desktop/downloads/` 中的 Python 嵌入包、简体中文安装语言文件和 Microsoft WebView2 Bootstrapper。构建脚本使用独立白名单目录并校验 Bootstrapper 的 Microsoft 数字签名。
 安装器定义位于 `desktop/installer.iss`。产物的 SHA-256 摘要与 EXE 保存在同一目录。
+
+构建使用 `--self-contained false`，从微软 .NET 8 发布元数据解析稳定版本，下载到构建缓存，校验官方 SHA-512 与 Microsoft 数字签名，将固定下载地址及 SHA-256 写入安装器，运行时安装包不会被内嵌。安装中网络失败、校验失败或拒绝管理员权限会停止并允许重试；需要重启时先重启再继续。
+
+从 1.1.1 升级时，`legacy-runtime-files.iss` 仅删除旧版程序目录中列出的运行库文件，保留 Python、配置、日志及备份。不会卸载系统 .NET。源码目录构建使用同一清理清单；构建前先退出桌面程序。
 
 已验证：独立目录静默安装、从安装目录启动桌面及后台、重复启动唤回窗口、托盘退出、覆盖安装保留配置哈希、卸载保留配置。8 项后端测试通过；完整 FRP 转发测试因本机没有可用的测试 FRPS 而跳过。
 
@@ -35,7 +39,7 @@
 - 开机自启默认关闭。勾选后当前 Windows 用户登录时驻留托盘；**不会自动启动 FRPC 转发**，需手动启动客户端。
 - 这是登录用户会话内的后台软件，不是 Windows 系统服务。睡眠、关机或退出 Windows 登录后不能继续转发。
 
-构建后的目录版本附带 .NET 8 和 Python 运行文件。界面需要机器上安装 Microsoft Edge WebView2 Runtime。移动软件时请保留整个项目目录，不能只复制 exe；移动后需重新设置开机自启路径。
+构建后的目录版本附带 Python 运行文件，界面需要机器上安装 .NET 8 Desktop Runtime x64 和 Microsoft Edge WebView2 Runtime。移动软件时请保留整个项目目录，不能只复制 exe；移动后需重新设置开机自启路径。
 
 网页浏览器入口 `http://127.0.0.1:17600` 仍可使用。桌面软件退出后该本地入口也会停止。
 
