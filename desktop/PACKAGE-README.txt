@@ -356,6 +356,7 @@ Get-NetTCPConnection -State Listen -LocalPort 17600,7400 -ErrorAction SilentlyCo
 | 文件格式或大小不符 | 确认是真正的 UTF-8 TOML，扩展名为 .toml，且不超过 256 KiB |
 | 缺少 serverAddr | 确认选择 FRPC 客户端文件，而不是 FRPS 服务端文件 |
 | 引用了其他配置文件 | 将非空 includes 引用合并为一个 TOML，再导入 |
+| HTTP/HTTPS 代理缺少访问域名 | 按服务商支持的方式填写 customDomains 或 subdomain；没有域名且希望使用公网 IP:端口时，在服务商后台创建 TCP 隧道并重新导出配置 |
 | FRP 校验失败 | 检查字段、重复名称及引用文件是否适用于附带的 FRPC 0.71.0；参阅服务商原始配置 |
 | 运行中无法应用 | 先停止客户端，确认管理端口不再被占用 |
 | 预览后无法提交 | 原配置可能被外部修改，重新选择文件、预览并提交 |

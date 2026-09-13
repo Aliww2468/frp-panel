@@ -73,3 +73,44 @@ transport.useEncryption = true
             with self.assertRaisesRegex(ValueError, 'client active'):
                 panel.import_connection({**self.body, 'revision': preview['revision']})
         self.assertEqual(panel.CONFIG.read_text(), self.original)
+
+    def test_web_proxy_missing_domain_has_actionable_private_error(self):
+        for protocol in ('http', 'https'):
+            with self.subTest(protocol=protocol):
+                body = {'filename': 'web.toml', 'content': f'''serverAddr = "127.0.0.1"
+auth.token = "private-web-token"
+[[proxies]]
+name = "private-web-name"
+type = "{protocol}"
+localPort = 3000
+'''}
+                for preview in (True, False):
+                    with patch.object(panel, 'ensure_stopped'):
+                        with self.assertRaisesRegex(ValueError, f'第 1 条 {protocol.upper()} 代理缺少访问域名') as caught:
+                            panel.import_connection({**body, 'revision': panel.hashlib.sha256(self.original.encode()).hexdigest()}, preview=preview)
+                    self.assertIn('customDomains', str(caught.exception))
+                    self.assertNotIn('private-web', str(caught.exception))
+                    self.assertEqual(panel.CONFIG.read_text(), self.original)
+
+    def test_web_proxy_domain_forms_pass_real_validator_and_are_preserved(self):
+        for protocol in ('http', 'https'):
+            for domain in ('customDomains = ["web.example.com"]', 'subdomain = "example"'):
+                with self.subTest(protocol=protocol, domain=domain):
+                    body = {'filename': 'web.toml', 'content': f'''serverAddr = "127.0.0.1"
+[[proxies]]
+name = "web-example"
+type = "{protocol}"
+localPort = 3000
+{domain}
+transport.useEncryption = true
+'''}
+                    preview = panel.import_connection(body, preview=True)
+                    self.assertEqual(preview['proxyCount'], 1)
+                    candidate, _ = panel.prepare_import(body, panel.read_config()[1])
+                    parsed = panel.tomllib.loads(candidate)['proxies'][0]
+                    self.assertTrue(parsed['transport']['useEncryption'])
+                    if domain.startswith('customDomains'):
+                        self.assertEqual(parsed['customDomains'], ['web.example.com'])
+                    else:
+                        self.assertEqual(parsed['subdomain'], 'example')
+                    self.assertEqual(panel.CONFIG.read_text(), self.original)

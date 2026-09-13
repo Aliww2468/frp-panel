@@ -372,6 +372,11 @@ def prepare_import(body, current):
     proxies = imported.get('proxies', [])
     if not isinstance(proxies, list) or any(not isinstance(proxy, dict) for proxy in proxies):
         raise ValueError('代理规则必须使用 [[proxies]] 数组格式')
+    for index, proxy in enumerate(proxies, 1):
+        if proxy.get('type') in ('http', 'https') and not proxy.get('customDomains') and not proxy.get('subdomain'):
+            # Identify the rule by position without exposing imported names or credentials.
+            raise ValueError(f'第 {index} 条 {proxy["type"].upper()} 代理缺少访问域名：请填写服务商支持的 customDomains 或 subdomain。'
+                             '如需通过公网 IP:端口访问，请在服务商后台创建 TCP 隧道后重新导出配置。')
     visitors = imported.get('visitors', [])
     if not isinstance(visitors, list) or any(not isinstance(visitor, dict) for visitor in visitors):
         raise ValueError('访问者规则必须使用 [[visitors]] 数组格式')
