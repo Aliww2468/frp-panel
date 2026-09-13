@@ -1,4 +1,4 @@
-param([string]$Compiler = (Join-Path $PSScriptRoot 'tools\inno\ISCC.exe'), [string]$Version = '1.2.1')
+param([string]$Compiler = (Join-Path $PSScriptRoot 'tools\inno\ISCC.exe'), [string]$Version = '1.3.0')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must use major.minor.patch format.' }
 $projectRoot = Split-Path $PSScriptRoot -Parent

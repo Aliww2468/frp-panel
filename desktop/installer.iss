@@ -5,7 +5,7 @@
   #error ReleaseDir is required
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.2.1"
+  #define AppVersion "1.3.0"
 #endif
 #ifndef DotNetUrl
   #error DotNetUrl is required
@@ -15,8 +15,13 @@
 #endif
 
 [Setup]
+#ifdef InstallerTest
+AppId={{41CDE0F3-114A-4CAB-A50B-91D450877BE4}
+AppName=FRP Panel Update Test
+#else
 AppId={{6A9160D7-25A5-4C4D-B459-E3FB45830810}
 AppName=FRP Panel
+#endif
 AppVersion={#AppVersion}
 AppPublisher=FRP Panel
 DefaultDirName={localappdata}\Programs\FrpPanel
@@ -54,11 +59,130 @@ Name: "{group}\FRP Panel"; Filename: "{app}\desktop\app\FrpPanel.exe"; WorkingDi
 Name: "{autodesktop}\FRP Panel"; Filename: "{app}\desktop\app\FrpPanel.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\desktop\app\FrpPanel.exe"; Description: "启动 FRP Panel"; Flags: nowait postinstall skipifsilent
+#ifndef InstallerTest
+Filename: "{app}\desktop\app\FrpPanel.exe"; Description: "启动 FRP Panel"; Flags: nowait postinstall skipifsilent; Check: not IsOnlineUpdate
+Filename: "{app}\desktop\app\FrpPanel.exe"; Parameters: "--port {code:UpdatePortArgument}"; Flags: nowait; Check: IsOnlineUpdate; BeforeInstall: ReleaseUpdateMutex
+#endif
 
 [Code]
 var
   RuntimeDownloadPage: TDownloadWizardPage;
+  OnlineUpdate, OnlineMutexOwned: Boolean;
+  OnlineReady, OnlineCommit, OnlineAbort, OnlineParent, OnlineBackend, OnlineMutex: THandle;
+  OnlinePort: Integer;
+
+function OpenProcess(Access: LongWord; Inherit: Boolean; ProcessId: LongWord): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function OpenEvent(Access: LongWord; Inherit: Boolean; Name: String): THandle;
+  external 'OpenEventW@kernel32.dll stdcall';
+function CreateMutex(Attributes: LongWord; InitialOwner: Boolean; Name: String): THandle;
+  external 'CreateMutexW@kernel32.dll stdcall';
+function SignalEvent(Handle: THandle): Boolean;
+  external 'SetEvent@kernel32.dll stdcall';
+function WaitHandle(Handle: THandle; Milliseconds: LongWord): LongWord;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+function ReleaseMutex(Handle: THandle): Boolean;
+  external 'ReleaseMutex@kernel32.dll stdcall';
+
+function IsOnlineUpdate: Boolean;
+begin
+  Result := OnlineUpdate;
+end;
+
+function UpdatePortArgument(Param: String): String;
+begin
+  Result := IntToStr(OnlinePort);
+end;
+
+procedure ReleaseUpdateMutex;
+begin
+  if OnlineMutexOwned then
+  begin
+    ReleaseMutex(OnlineMutex);
+    OnlineMutexOwned := False;
+  end;
+end;
+
+function InitializeSetup: Boolean;
+var
+  Nonce, Prefix: String;
+  I, ParentPid, BackendPid: Integer;
+begin
+  Result := True;
+  Nonce := ExpandConstant('{param:FRPUPDATE|}');
+  OnlineUpdate := Nonce <> '';
+  if not OnlineUpdate then Exit;
+  Result := False;
+  if Length(Nonce) <> 32 then Exit;
+  for I := 1 to Length(Nonce) do
+    if Pos(Nonce[I], '0123456789abcdef') = 0 then Exit;
+  ParentPid := StrToIntDef(ExpandConstant('{param:FRPPID|0}'), 0);
+  BackendPid := StrToIntDef(ExpandConstant('{param:FRPBACKENDPID|0}'), 0);
+  OnlinePort := StrToIntDef(ExpandConstant('{param:FRPPORT|17600}'), 0);
+  if (ParentPid <= 0) or (BackendPid <= 0) or (ParentPid = BackendPid) or (OnlinePort < 1024) or (OnlinePort > 65535) then Exit;
+  Prefix := 'Local\FrpPanel-Update-' + Nonce;
+  OnlineReady := OpenEvent($0002, False, Prefix + '-Ready');
+  OnlineCommit := OpenEvent($00100000, False, Prefix + '-Commit');
+  OnlineAbort := OpenEvent($00100000, False, Prefix + '-Abort');
+  OnlineParent := OpenProcess($00100000, False, ParentPid);
+  OnlineBackend := OpenProcess($00100000, False, BackendPid);
+  OnlineMutex := CreateMutex(0, False, 'Local\FrpPanel-SingleInstance');
+  Result := (OnlineReady <> 0) and (OnlineCommit <> 0) and (OnlineAbort <> 0) and
+    (OnlineParent <> 0) and (OnlineBackend <> 0) and (OnlineMutex <> 0);
+  if Result then Result := SignalEvent(OnlineReady);
+end;
+
+function WaitForUpdateShutdown: String;
+var
+  Attempts: Integer;
+  WaitResult: LongWord;
+begin
+  Result := '';
+  if not OnlineUpdate then Exit;
+  Log('Online update: waiting for explicit handoff before changing files.');
+  Attempts := 0;
+  while WaitHandle(OnlineCommit, 100) <> 0 do
+  begin
+    Attempts := Attempts + 1;
+    if (WaitHandle(OnlineAbort, 0) = 0) or (Attempts >= 600) then
+    begin
+      Result := '更新已取消或退出后台失败，当前文件未修改。请关闭安装程序后重试。';
+      Exit;
+    end;
+  end;
+  if WaitHandle(OnlineAbort, 0) = 0 then
+  begin
+    Result := '更新已取消，当前文件未修改。';
+    Exit;
+  end;
+  if (WaitHandle(OnlineParent, 30000) <> 0) or (WaitHandle(OnlineBackend, 30000) <> 0) then
+  begin
+    Result := '旧版软件或后台尚未退出，请退出后重试。';
+    Exit;
+  end;
+  if not OnlineMutexOwned then
+  begin
+    WaitResult := WaitHandle(OnlineMutex, 0);
+    OnlineMutexOwned := (WaitResult = 0) or (WaitResult = $80);
+  end;
+  if not OnlineMutexOwned then
+    Result := '另一个 FRP 面板已启动，请退出后重试更新。'
+  else
+    Log('Online update: desktop and backend exited; installation may proceed.');
+end;
+
+procedure DeinitializeSetup;
+begin
+  ReleaseUpdateMutex;
+  if OnlineReady <> 0 then CloseHandle(OnlineReady);
+  if OnlineCommit <> 0 then CloseHandle(OnlineCommit);
+  if OnlineAbort <> 0 then CloseHandle(OnlineAbort);
+  if OnlineParent <> 0 then CloseHandle(OnlineParent);
+  if OnlineBackend <> 0 then CloseHandle(OnlineBackend);
+  if OnlineMutex <> 0 then CloseHandle(OnlineMutex);
+end;
 
 procedure InitializeWizard;
 begin
@@ -154,6 +278,8 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ExitCode: Integer;
 begin
+  Result := WaitForUpdateShutdown;
+  if Result <> '' then Exit;
   Result := EnsureDesktopRuntime(NeedsRestart);
   if Result <> '' then Exit;
   if not HasWebView2 then

@@ -1,4 +1,8 @@
 // Appearance is local to this installation's browser profile.
+if (window.chrome?.webview) {
+  document.querySelector('#check-update').classList.remove('hidden');
+  document.querySelector('#check-update').addEventListener('click', () => window.chrome.webview.postMessage('update:open'));
+}
 const themeKey = 'frp-panel-theme';
 const availableThemes = ['light','dark','sand','blue'];
 function applyTheme(theme) {

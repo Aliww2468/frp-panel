@@ -72,6 +72,7 @@ internal sealed class PanelWindow : Form
     readonly System.Windows.Forms.Timer timer = new() { Interval = 6000 };
     readonly HttpClient http = new(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(24) };
     Process? backend;
+    UpdateDialog? updateDialog;
     bool exiting, busy, pollBusy, initialized, announced, background;
     string token = "";
     string theme = "light";
@@ -146,6 +147,7 @@ internal sealed class PanelWindow : Form
         startupItem.Click += (_, _) => ToggleStartup();
         menu.Items.Add(startupItem);
         menu.Items.Add("打开配置目录", null, (_, _) => Process.Start(new ProcessStartInfo(Path.Combine(workspace, "client")) { UseShellExecute = true }));
+        menu.Items.Add("检查更新", null, (_, _) => ShowUpdates());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出软件并停止转发", null, async (_, _) => await ExitPanel());
         menu.Opening += (_, _) => startupItem.Checked = StartupEnabled();
@@ -244,6 +246,7 @@ internal sealed class PanelWindow : Form
                     string message = e.TryGetWebMessageAsString();
                     if (message.StartsWith("theme:", StringComparison.Ordinal))
                         ApplyWindowTheme(message[6..], persist: true);
+                    else if (message == "update:open") ShowUpdates();
                 }
                 catch (ArgumentException) { }
             };
@@ -315,6 +318,81 @@ internal sealed class PanelWindow : Form
     void ShowPanel()
     {
         background = false; Show(); WindowState = FormWindowState.Normal; Activate();
+    }
+
+    void ShowUpdates()
+    {
+        if (busy || exiting) return;
+        ShowPanel();
+        if (updateDialog != null && !updateDialog.IsDisposed) { updateDialog.Activate(); return; }
+        updateDialog = new UpdateDialog(Path.Combine(stateDir, "Updates"), BackColor, loading.ForeColor, InstallUpdate);
+        updateDialog.Show(this);
+    }
+
+    async Task InstallUpdate(DownloadedUpdate update)
+    {
+        if (busy || exiting) throw new InvalidOperationException("正在执行其他操作，请稍后重试。");
+        string expectedApp = Path.GetFullPath(Path.Combine(workspace, "desktop", "app")).TrimEnd(Path.DirectorySeparatorChar);
+        if (!string.Equals(expectedApp, AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("程序与配置位于不同目录，请使用安装包手动更新。");
+        busy = true;
+        string nonce = Guid.NewGuid().ToString("N");
+        string eventName = @"Local\FrpPanel-Update-" + nonce;
+        using var ready = new EventWaitHandle(false, EventResetMode.ManualReset, eventName + "-Ready");
+        using var commit = new EventWaitHandle(false, EventResetMode.ManualReset, eventName + "-Commit");
+        using var abort = new EventWaitHandle(false, EventResetMode.ManualReset, eventName + "-Abort");
+        Process? shutdownBackend = null;
+        bool backendStopped = false;
+        try
+        {
+            using (var input = File.OpenRead(update.Path))
+                if (!Convert.ToHexString(await SHA256.HashDataAsync(input)).Equals(update.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("安装包已发生变化，请重新下载。");
+            if (!Version.TryParse(FileVersionInfo.GetVersionInfo(update.Path).FileVersion, out var fileVersion) ||
+                new Version(fileVersion.Major, fileVersion.Minor, Math.Max(0, fileVersion.Build)) != update.Release.Version)
+                throw new InvalidDataException("安装包版本与更新信息不一致。");
+            if (!await IsBackendReady()) throw new InvalidOperationException("后台暂时未连接，请恢复连接后重试更新。");
+            using var health = JsonDocument.Parse(await http.GetStringAsync(BaseUrl + "/api/health"));
+            int backendPid = health.RootElement.GetProperty("pid").GetInt32();
+            shutdownBackend = Process.GetProcessById(backendPid);
+            shutdownBackend.EnableRaisingEvents = true;
+            var start = new ProcessStartInfo(update.Path) { UseShellExecute = false };
+            foreach (string argument in new[] { "/SP-", "/SILENT", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS",
+                "/DIR=" + workspace, "/FRPUPDATE=" + nonce, "/FRPPID=" + Environment.ProcessId,
+                "/FRPBACKENDPID=" + backendPid, "/FRPPORT=" + panelPort, "/LOG=" + Path.Combine(Path.GetDirectoryName(update.Path)!, "install.log") })
+                start.ArgumentList.Add(argument);
+            using var installer = Process.Start(start) ?? throw new InvalidOperationException("无法启动安装程序。");
+            var timeout = Stopwatch.StartNew();
+            while (!ready.WaitOne(0))
+            {
+                if (installer.HasExited || timeout.Elapsed > TimeSpan.FromSeconds(40))
+                    throw new InvalidOperationException("安装程序未准备好，当前软件保持运行，请重试。");
+                await Task.Delay(100);
+            }
+            // The installer is waiting on our process handles and will not touch files
+            // unless shutdown succeeds and we explicitly commit this handoff.
+            await Post("/api/desktop/exit");
+            backendStopped = true;
+            if (installer.HasExited) throw new InvalidOperationException("安装已取消，请重试更新。");
+            commit.Set();
+            exiting = true; timer.Stop(); tray.Visible = false; Close();
+        }
+        catch
+        {
+            abort.Set();
+            if (backendStopped && !exiting)
+            {
+                try
+                {
+                    await shutdownBackend!.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    backend?.Dispose(); backend = null;
+                    await EnsureBackend();
+                }
+                catch (Exception recoveryError) { Log(recoveryError.Message); }
+            }
+            throw;
+        }
+        finally { shutdownBackend?.Dispose(); busy = false; }
     }
 
     void HideToTray()

@@ -2,7 +2,7 @@
 
 ## EXE 安装包
 
-成品位于 `../release/FRP-Panel-Setup-1.2.1-x64.exe`，也可从仓库 Releases 下载，支持 Windows 10/11 x64。
+成品位于 `../release/FRP-Panel-Setup-1.3.0-x64.exe`，也可从仓库 Releases 下载，支持 Windows 10/11 x64。
 安装包内置 Python 和 FRPC，桌面程序使用系统共享的 .NET 8 Desktop Runtime x64；安装后通过桌面或开始菜单快捷方式启动。
 应用默认安装到 `%LOCALAPPDATA%/Programs/FrpPanel`。安装时检测 .NET 8 桌面及核心运行时，已有则跳过下载；缺少时下载并校验微软官方安装程序，再请求管理员权限完成系统运行时安装。
 普通 .NET Runtime、x86 运行时或仅有 .NET 9/10 不能替代所需的 .NET 8 Desktop Runtime x64。缺少 WebView2 时也会联网安装。离线安装需提前准备这两项运行环境。
@@ -19,6 +19,18 @@
 从 1.1.1 升级时，`legacy-runtime-files.iss` 仅删除旧版程序目录中列出的运行库文件，保留 Python、配置、日志及备份。不会卸载系统 .NET。源码目录构建使用同一清理清单；构建前先退出桌面程序。
 
 已验证：独立目录静默安装、从安装目录启动桌面及后台、托盘退出、覆盖安装保留配置哈希、卸载保留配置。8 项后端测试通过；完整 FRP 转发测试因本机没有可用的测试 FRPS 而跳过。
+
+## 在线更新
+
+从 1.3.0 开始，桌面右上角和托盘菜单提供「检查更新」。只查询 `Aliww2468/frp-panel` 的 GitHub 最新正式版，不接受预发布版、同版本或降级。更新说明按纯文本显示。
+
+先下载，验证 `.sha256` 文件及 GitHub 资产摘要（可用时），再由用户确认「安装并重启」。仅允许本仓库的固定格式资产地址和 GitHub HTTPS 下载节点，下载限制为 128 MiB，失败时移除未完成文件。
+
+安装器与桌面使用临时事件确认交接。桌面停止 FRPC 与后台后才提交更新；安装器持有旧桌面和后台的进程句柄，等待退出后才修改文件，防止 PID 重用或文件占用。取消交接、退出失败或超时均不会继续安装。安装成功后释放单实例锁并启动更新后的软件，客户端转发需手动恢复。
+
+安装目标是当前配置目录，保持配置和缓存标识一致。若可执行文件与配置目录分离，使用安装包手动更新。更新缓存及安装日志位于 `%LOCALAPPDATA%/FrpPanel/<目录标识>/Updates/`。
+
+无需 GitHub 登录。网络无法连接 GitHub 或触发请求限额时可稍后重试；不会使用第三方镜像或自动强制升级。网页浏览器模式不显示桌面更新入口。
 
 ## 外观风格
 
@@ -69,5 +81,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1
 
 后端测试：`desktop/app/python/python.exe -m unittest discover -s panel/tests -v`。
 单实例回归测试：`dotnet run --project desktop/tests/SingleInstanceChecks/SingleInstanceChecks.csproj -c Release`，覆盖并发启动、不同工作目录、重复实例退出、异常退出恢复和旧版进程检测分支。
+更新回归测试：`dotnet run --project desktop/tests/UpdateChecks/UpdateChecks.csproj -c Release`；加 `-- --live` 可真实读取 GitHub Release 并下载校验安装包，不执行安装。
+安装交接测试：用 `installer.iss` 的 `/DInstallerTest=1` 生成使用独立 AppId、关闭自动启动的测试安装包，再执行 `dotnet run --project desktop/tests/InstallerHandoffChecks/InstallerHandoffChecks.csproj -c Release -- <测试安装包> <全新隔离目录>`。验证取消不写文件、等待旧进程退出、安装成功及配置保留。勿把测试安装包发布到 Releases。
 桌面验证包括实际打开、关闭到托盘、后台接口持续响应，以及退出时停止后台。新版启动检查先于配置读取和后台启动；提示框关闭后，本次临时启动进程退出，原面板继续运行。
 开机登录行为需要在用户开启自启并重新登录后验证。
